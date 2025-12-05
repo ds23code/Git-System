@@ -1,0 +1,157 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import shutil
+import pathlib
+
+if len(sys.argv) != 2:
+    print("usage: {} <branch>".format(os.path.basename(sys.argv[0])))
+    exit(1)
+
+target_branch_name = sys.argv[1]
+repository_directory = ".mygit"
+
+# Check if the repository directory exists
+if not os.path.exists(repository_directory):
+    print("{}: error: no .mygit directory found".format(os.path.basename(sys.argv[0])))
+    exit(1)
+
+branches_directory = os.path.join(repository_directory, "branches")
+current_branch_file_path = os.path.join(repository_directory, "current_branch")
+commits_directory = os.path.join(repository_directory, "commits")
+index_directory = os.path.join(repository_directory, "index")
+
+# Check if the branches directory exists
+if not os.path.exists(branches_directory):
+    print("{}: error: no branches directory found".format(os.path.basename(sys.argv[0])))
+    exit(1)
+
+target_branch_file_path = os.path.join(branches_directory, target_branch_name)
+# Check if the target branch exists
+if not os.path.exists(target_branch_file_path):
+    print("{}: error: unknown branch '{}'".format(os.path.basename(sys.argv[0]), target_branch_name))
+    exit(1)
+
+# Read the current branch name from file, default to 'trunk' if not found
+try:
+    with open(current_branch_file_path, "r") as f:
+        current_branch_name = f.read().strip()
+except IOError:
+    current_branch_name = "trunk"
+
+# If already on the target branch, exit early
+if current_branch_name == target_branch_name:
+    print("Already on '{}'".format(target_branch_name))
+    exit(0)
+
+def files_are_identical(file_path_a, file_path_b):
+    """
+    Compare two files byte-by-byte to determine if they are identical.
+    Returns True if identical, False otherwise.
+    """
+    try:
+        with open(file_path_a, "rb") as file_a, open(file_path_b, "rb") as file_b:
+            return file_a.read() == file_b.read()
+    except:
+        return False
+
+# Collect all files currently in the index directory (staged files)
+current_indexed_files = set()
+if os.path.exists(index_directory):
+    for root, dirs, files in os.walk(index_directory):
+        for filename in files:
+            relative_path = os.path.relpath(os.path.join(root, filename), index_directory)
+            current_indexed_files.add(relative_path)
+
+# Check for conflicts between working directory files and index files
+conflicting_files_list = []
+for relative_file_path in current_indexed_files:
+    index_file_full_path = os.path.join(index_directory, relative_file_path)
+    working_directory_file_path = relative_file_path
+    if os.path.exists(working_directory_file_path) and os.path.exists(index_file_full_path):
+        if not files_are_identical(working_directory_file_path, index_file_full_path):
+            conflicting_files_list.append(relative_file_path)
+
+# Read the commit ID that the target branch points to
+try:
+    with open(target_branch_file_path, "r") as f:
+        target_commit_id = f.read().strip()
+except IOError:
+    target_commit_id = ""
+
+target_commit_files_set = set()
+target_commit_directory = ""
+# If target commit ID is valid, collect files from that commit
+if target_commit_id.isdigit() and target_commit_id != "":
+    target_commit_directory = os.path.join(commits_directory, target_commit_id)
+    if os.path.exists(target_commit_directory):
+        for root, dirs, files in os.walk(target_commit_directory):
+            for filename in files:
+                if filename == "commit_info":
+                    continue
+                relative_path = os.path.relpath(os.path.join(root, filename), target_commit_directory)
+                target_commit_files_set.add(relative_path)
+
+# Check for conflicts between working directory files and files in the target commit
+if target_commit_directory:
+    for relative_file_path in target_commit_files_set - current_indexed_files:
+        working_directory_file_path = relative_file_path
+        if os.path.exists(working_directory_file_path):
+            target_commit_file_path = os.path.join(target_commit_directory, relative_file_path)
+            if os.path.exists(target_commit_file_path) and not files_are_identical(working_directory_file_path, target_commit_file_path):
+                conflicting_files_list.append(relative_file_path)
+
+# If there are conflicting files, abort checkout and show error
+if conflicting_files_list:
+    print("{}: error: Your changes to the following files would be overwritten by checkout:".format(os.path.basename(sys.argv[0])))
+    for conflicting_file in conflicting_files_list:
+        print(conflicting_file)
+    exit(1)
+
+# Remove files present in the index but not in the target commit from the working directory
+for relative_file_path in current_indexed_files - target_commit_files_set:
+    if os.path.exists(relative_file_path):
+        os.remove(relative_file_path)
+
+# Remove the entire index directory to prepare for new index files
+if os.path.exists(index_directory):
+    shutil.rmtree(index_directory)
+os.makedirs(index_directory, exist_ok=True)
+
+# Copy files from the target commit to both working directory and index
+if target_commit_id.isdigit() and target_commit_id != "" and os.path.exists(target_commit_directory):
+    for root, dirs, files in os.walk(target_commit_directory):
+        for filename in files:
+            if filename == "commit_info":
+                continue
+            commit_file_full_path = os.path.join(root, filename)
+            if not os.path.exists(commit_file_full_path):
+                print(f"Warning: expected file {commit_file_full_path} missing in commit directory")
+                continue
+            relative_path = os.path.relpath(commit_file_full_path, target_commit_directory)
+
+            # Destination path in working directory (relative to current dir)
+            working_directory_destination_path = relative_path
+
+            # Ensure directory exists for the working directory file
+            working_directory_parent_dir = os.path.dirname(working_directory_destination_path)
+            if working_directory_parent_dir and not os.path.exists(working_directory_parent_dir):
+                os.makedirs(working_directory_parent_dir, exist_ok=True)
+
+            # Copy file from commit to working directory
+            shutil.copy2(commit_file_full_path, working_directory_destination_path)
+
+            # Also copy file to index directory to update the index
+            index_destination_path = os.path.join(index_directory, relative_path)
+            index_parent_dir = os.path.dirname(index_destination_path)
+            if index_parent_dir and not os.path.exists(index_parent_dir):
+                os.makedirs(index_parent_dir, exist_ok=True)
+
+            shutil.copy2(commit_file_full_path, index_destination_path)
+
+# Update the current branch file to the new branch name
+with open(current_branch_file_path, "w") as f:
+    f.write(target_branch_name)
+
+print("Switched to branch '{}'".format(target_branch_name))

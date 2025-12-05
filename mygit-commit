@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+import shutil
+
+def files_are_identical(file_path1, file_path2):
+    """
+    Compare two files byte by byte to check if they are identical.
+    Returns True if files are the same, False otherwise or if any error occurs.
+    """
+    try:
+        with open(file_path1, "rb") as f1, open(file_path2, "rb") as f2:
+            return f1.read() == f2.read()
+    except:
+        return False
+
+def main():
+    # Check if the .mygit directory exists; if not, print error and exit
+    if not os.path.isdir(".mygit"):
+        print("mygit-commit: error: no .mygit directory found", file=sys.stderr)
+        sys.exit(1)
+    
+    commit_all_flag = False
+    command_args = sys.argv[1:]
+    
+    # Check for -a flag to commit all changes
+    if command_args and command_args[0] == "-a":
+        commit_all_flag = True
+        command_args = command_args[1:]
+    
+    # Validate arguments: must have -m followed by commit message
+    if not command_args or command_args[0] != "-m" or len(command_args) < 2:
+        print("usage: mygit-commit [-a] -m commit-message", file=sys.stderr)
+        sys.exit(1)
+    
+    commit_message = command_args[1]
+    
+    index_directory = ".mygit/index"
+    commits_directory = ".mygit/commits"
+    
+    # If -a flag is set, update the index with all tracked files from last commit
+    if commit_all_flag:
+        try:
+            with open(".mygit/commit_count", "r") as f:
+                total_commits = int(f.read().strip())
+        except:
+            total_commits = 0
+            
+        if total_commits > 0:
+            last_commit_directory = os.path.join(commits_directory, str(total_commits - 1))
+            if os.path.exists(last_commit_directory):
+                for root, _, files in os.walk(last_commit_directory):
+                    for file in files:
+                        if file != "commit_info":
+                            relative_file_path = os.path.relpath(os.path.join(root, file), last_commit_directory)
+                            if os.path.exists(relative_file_path) and os.path.isfile(relative_file_path):
+                                index_file_path = os.path.join(index_directory, relative_file_path)
+                                index_file_dir = os.path.dirname(index_file_path)
+                                if index_file_dir != index_directory:
+                                    os.makedirs(index_file_dir, exist_ok=True)
+                                shutil.copy2(relative_file_path, index_file_path)
+    
+    # If index directory does not exist, nothing to commit
+    if not os.path.exists(index_directory):
+        print("nothing to commit")
+        return
+    
+    staged_files = []
+    # Gather all files staged in the index (excluding commit_info)
+    for root, _, files in os.walk(index_directory):
+        for file in files:
+            if file != "commit_info":
+                relative_file_path = os.path.relpath(os.path.join(root, file), index_directory)
+                staged_files.append(relative_file_path)
+    
+    # Handle case where no files are staged
+    if not staged_files:
+        # Attempt to read total commits count
+        try:
+            with open(".mygit/commit_count", "r") as f:
+                total_commits = int(f.read().strip())
+        except:
+            total_commits = 0
+
+        if total_commits > 0:
+            last_commit_directory = os.path.join(commits_directory, str(total_commits - 1))
+            if os.path.exists(last_commit_directory):
+                last_commit_files = []
+                for root, _, files in os.walk(last_commit_directory):
+                    for file in files:
+                        if file != "commit_info":
+                            relative_file_path = os.path.relpath(os.path.join(root, file), last_commit_directory)
+                            last_commit_files.append(relative_file_path)
+                if last_commit_files:
+                    # Files existed in last commit but none staged now;
+                    # implies removals to commit, so continue without printing message
+                    pass
+                else:
+                    # No files staged and last commit empty: nothing to commit
+                    print("nothing to commit")
+                    return
+        else:
+            # No commits yet and no staged files
+            print("nothing to commit")
+            return
+
+    # Read current commit count
+    try:
+        with open(".mygit/commit_count", "r") as f:
+            total_commits = int(f.read().strip())
+    except:
+        total_commits = 0
+    
+    # If there are previous commits, check if staged files differ from last commit
+    if total_commits > 0:
+        last_commit_directory = os.path.join(commits_directory, str(total_commits - 1))
+        if os.path.exists(last_commit_directory):
+            last_commit_files = []
+            for root, _, files in os.walk(last_commit_directory):
+                for file in files:
+                    if file != "commit_info":
+                        relative_file_path = os.path.relpath(os.path.join(root, file), last_commit_directory)
+                        last_commit_files.append(relative_file_path)
+            
+            # If staged files and last commit files have same names, check contents
+            if set(staged_files) == set(last_commit_files):
+                all_files_identical = True
+                for filename in staged_files:
+                    staged_file_path = os.path.join(index_directory, filename)
+                    last_commit_file_path = os.path.join(last_commit_directory, filename)
+                    if not files_are_identical(staged_file_path, last_commit_file_path):
+                        all_files_identical = False
+                        break
+                if all_files_identical:
+                    # No changes detected compared to last commit
+                    print("nothing to commit")
+                    return
+    
+    # Prepare new commit directory
+    new_commit_directory = os.path.join(commits_directory, str(total_commits))
+    os.makedirs(new_commit_directory, exist_ok=True)
+    
+    # Copy all staged files into the new commit directory
+    for filename in staged_files:
+        source_file = os.path.join(index_directory, filename)
+        destination_file = os.path.join(new_commit_directory, filename)
+        destination_dir = os.path.dirname(destination_file)
+        if destination_dir != new_commit_directory:
+            os.makedirs(destination_dir, exist_ok=True)
+        shutil.copy2(source_file, destination_file)
+    
+    # Create commit_info file with commit message and list of files
+    commit_metadata = {
+        "message": commit_message,
+        "files": staged_files
+    }
+    
+    with open(os.path.join(new_commit_directory, "commit_info"), "w") as commit_info_file:
+        json.dump(commit_metadata, commit_info_file)
+    
+    # Update commit count
+    with open(".mygit/commit_count", "w") as commit_count_file:
+        commit_count_file.write(str(total_commits + 1))
+    
+    # Update current branch pointer to new commit number
+    try:
+        with open(".mygit/current_branch", "r") as branch_file:
+            current_branch_name = branch_file.read().strip()
+    except:
+        current_branch_name = "trunk"
+    
+    branches_directory = ".mygit/branches"
+    os.makedirs(branches_directory, exist_ok=True)
+    branch_commit_file = os.path.join(branches_directory, current_branch_name)
+    with open(branch_commit_file, "w") as branch_file:
+        branch_file.write(str(total_commits + 1))
+    
+    # Print confirmation message with new commit number
+    print(f"Committed as commit {total_commits}")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+
+# this script is not fully done i dont kow how to do it, 
+# but this is my overall approach
+
+import os
+import sys
+import json
+import shutil
+
+def usage():
+    print(f"usage: {os.path.basename(sys.argv[0])} <branch-name|commit-number> -m <message>")
+    exit(1)
+
+def read_commit_id_from_branch(repo_dir, branch_name):
+    print("i havent done this yet T-T too hard")
+    
+def get_current_branch(repo_dir):
+    print("i havent done this yet T-T too hard")
+
+def get_current_commit(repo_dir, current_branch):
+    print("i havent done this yet T-T too hard")
+
+def load_commit_files(repo_dir, commit_id):
+    print("i havent done this yet T-T too hard")
+
+def files_equal(f1, f2):
+    print("i havent done this yet T-T too hard")
+
+def merge_commits(repo_dir, current_commit, target_commit, index_path):
+    print("i havent done this yet T-T too hard")
+
+def write_commit(repo_dir, commit_message, index_path, current_commit, target_commit):
+    print("i havent done this yet T-T too hard")
+    
+def update_current_branch(repo_dir, current_branch, new_commit_id):
+    print("i havent done this yet T-T too hard")
+
+def main():
+    if len(sys.argv) < 4:
+        usage()
+
+    target = sys.argv[1]
+    if sys.argv[2] != "-m":
+        usage()
+    message = " ".join(sys.argv[3:]).strip()
+    if not message:
+        print(f"{os.path.basename(sys.argv[0])}: error: commit message required")
+        exit(1)
+
+    repo_dir = ".mygit"
+    index_path = os.path.join(repo_dir, "index")
+
+    if not os.path.exists(repo_dir):
+        print(f"{os.path.basename(sys.argv[0])}: error: no .mygit directory found")
+        exit(1)
+
+    # Determine target commit id
+    if target.isdigit():
+        target_commit = target
+    else:
+        target_commit = read_commit_id_from_branch(repo_dir, target)
+
+    current_branch = get_current_branch(repo_dir)
+    current_commit = get_current_commit(repo_dir, current_branch)
+
+    # Merge target commit into index (and current index)
+    merge_commits(repo_dir, current_commit, target_commit, index_path)
+
+    # Write new commit with merged index and message
+    new_commit_id = write_commit(repo_dir, message, index_path, current_commit, target_commit)
+
+    # Update current branch pointer
+    update_current_branch(repo_dir, current_branch, new_commit_id)
+
+    print(f"Merge successful, created commit {new_commit_id}")
+
+if __name__ == "__main__":
+    main()

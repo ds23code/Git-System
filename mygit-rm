@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+def files_equal(file_path1, file_path2):
+    try:
+        if not os.path.exists(file_path1) or not os.path.exists(file_path2):
+            return False
+        with open(file_path1, "rb") as file1, open(file_path2, "rb") as file2:
+            return file1.read() == file2.read()
+    except:
+        return False
+
+def get_last_commit_file(filename):
+    try:
+        with open(".mygit/commit_count", "r") as f:
+            commit_count = int(f.read().strip())
+        if commit_count == 0:
+            return None
+        last_commit_dir = os.path.join(".mygit/commits", str(commit_count - 1))
+        return os.path.join(last_commit_dir, filename)
+    except:
+        return None
+
+def main():
+    # Check for existence of .mygit directory
+    if not os.path.isdir(".mygit"):
+        print("mygit-rm: error: no .mygit directory found", file=sys.stderr)
+        sys.exit(1)
+    
+    force_flag = False
+    cached_flag = False
+    target_filenames = []
+    
+    args = sys.argv[1:]
+    # Parse command-line arguments for flags and filenames
+    while args:
+        if args[0] == "--force":
+            force_flag = True
+            args = args[1:]
+        elif args[0] == "--cached":
+            cached_flag = True
+            args = args[1:]
+        else:
+            target_filenames = args
+            break
+    
+    # Validate presence of filenames to remove
+    if not target_filenames:
+        print("usage: mygit-rm [--force] [--cached] <filenames>", file=sys.stderr)
+        sys.exit(1)
+    
+    index_directory = ".mygit/index"
+    error_occurred = False
+    
+    for filename in target_filenames:
+        index_file_path = os.path.join(index_directory, filename)
+        working_file_path = filename
+        last_commit_file_path = get_last_commit_file(filename)
+        
+        in_index = os.path.exists(index_file_path)
+        in_working_directory = os.path.exists(working_file_path)
+        in_last_commit = last_commit_file_path and os.path.exists(last_commit_file_path)
+        
+        # Check if file is tracked by the repository (either in index or last commit)
+        if not in_index and not in_last_commit:
+            print(f"mygit-rm: error: '{filename}' is not in the mygit repository", file=sys.stderr)
+            error_occurred = True
+            continue
+        
+        if not force_flag:
+            if cached_flag:
+                # --cached mode error checking
+                if not in_index:
+                    # File neither in index nor in last commit -> error
+                    if not in_last_commit:
+                        print(f"mygit-rm: error: '{filename}' is not in the mygit repository", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                else:
+                    # File is in index - check for conflicts with --cached flag
+                    if in_working_directory and in_last_commit:
+                        index_eq_working = files_equal(index_file_path, working_file_path)
+                        working_eq_last = files_equal(working_file_path, last_commit_file_path)
+                        index_eq_last = files_equal(index_file_path, last_commit_file_path)
+                        
+                        # If index differs from both working file and last commit, error
+                        if not index_eq_working and not working_eq_last:
+                            print(f"mygit-rm: error: '{filename}' in index is different to both the working file and the repository", file=sys.stderr)
+                            error_occurred = True
+                            continue
+            else:
+                # Normal rm mode error checking
+                if in_working_directory and in_index and in_last_commit:
+                    index_eq_last = files_equal(index_file_path, last_commit_file_path)
+                    index_eq_working = files_equal(index_file_path, working_file_path)
+                    working_eq_last = files_equal(working_file_path, last_commit_file_path)
+                    
+                    # Index differs from both working file and last commit -> error
+                    if not index_eq_working and not working_eq_last:
+                        print(f"mygit-rm: error: '{filename}' in index is different to both the working file and the repository", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                    # Index differs from last commit but equals working file -> staged changes error
+                    elif not index_eq_last and index_eq_working:
+                        print(f"mygit-rm: error: '{filename}' has staged changes in the index", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                    # Working file differs from last commit but index equals last commit -> working directory changes error
+                    elif not working_eq_last and index_eq_last:
+                        print(f"mygit-rm: error: '{filename}' in the repository is different to the working file", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                
+                elif not in_working_directory and in_index and in_last_commit:
+                    # File deleted in working directory but index differs from last commit -> staged changes error
+                    if not files_equal(index_file_path, last_commit_file_path):
+                        print(f"mygit-rm: error: '{filename}' has staged changes in the index", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                
+                elif in_working_directory and not in_index and in_last_commit:
+                    # File present in working directory but not in index and differs from last commit -> working directory changes error
+                    if not files_equal(working_file_path, last_commit_file_path):
+                        print(f"mygit-rm: error: '{filename}' in the repository is different to the working file", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                
+                elif in_index and not in_last_commit:
+                    # New file staged in index but not in last commit
+                    if in_working_directory and not files_equal(index_file_path, working_file_path):
+                        print(f"mygit-rm: error: '{filename}' has staged changes in the index", file=sys.stderr)
+                        error_occurred = True
+                        continue
+                    elif not in_working_directory:
+                        print(f"mygit-rm: error: '{filename}' has staged changes in the index", file=sys.stderr)
+                        error_occurred = True
+                        continue
+        
+        # Perform removal from index and optionally from working directory
+        if in_index and os.path.exists(index_file_path):
+            os.remove(index_file_path)
+        if in_working_directory and not cached_flag and os.path.exists(working_file_path):
+            os.remove(working_file_path)
+    
+    if error_occurred:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

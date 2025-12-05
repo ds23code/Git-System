@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import json
+
+# Usage check: mygit-log takes no arguments
+if len(sys.argv) != 1:
+    print("usage: mygit-log", file=sys.stderr)
+    sys.exit(1)
+
+# Check for .mygit directory existence
+if not os.path.isdir(".mygit"):
+    print("mygit-log: error: no .mygit directory found", file=sys.stderr)
+    sys.exit(1)
+
+mygit_dir = ".mygit"
+commit_count_file = os.path.join(mygit_dir, "commit_count")
+commits_dir = os.path.join(mygit_dir, "commits")
+
+# Read commit count; if error, assume zero commits
+try:
+    with open(commit_count_file, "r") as f:
+        commit_count = int(f.read().strip())
+except (IOError, ValueError):
+    commit_count = 0
+
+# Print commits from newest to oldest
+for commit_num in range(commit_count - 1, -1, -1):
+    commit_dir = os.path.join(commits_dir, str(commit_num))
+    commit_info_file = os.path.join(commit_dir, "commit_info")
+    try:
+        with open(commit_info_file, "r") as f:
+            commit_info = json.load(f)
+            # Print: <commit_number> <commit_message>
+            print(f"{commit_num} {commit_info['message']}")
+    except (IOError, json.JSONDecodeError, KeyError):
+        # Skip malformed or missing commits
+        continue

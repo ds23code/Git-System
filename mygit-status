@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+import glob
+
+def files_equal(f1, f2):
+    try:
+        if not os.path.exists(f1) or not os.path.exists(f2):
+            return False
+        with open(f1, "rb") as a, open(f2, "rb") as b:
+            return a.read() == b.read()
+    except:
+        return False
+
+def get_file_state(file_path):
+    """Determine status of a single file"""
+    # Path setup
+    wd_path = file_path
+    index_path = os.path.join(".mygit/index", file_path)
+    last_commit_path = os.path.join(".mygit/commits", str(commit_count - 1), file_path) if commit_count > 0 else None
+    
+    # Existence checks
+    in_wd = os.path.exists(wd_path) and os.path.isfile(wd_path)
+    in_index = os.path.exists(index_path) and os.path.isfile(index_path)
+    in_last_commit = last_commit_path and os.path.exists(last_commit_path) and os.path.isfile(last_commit_path)
+    
+    # State determination
+    if in_wd and in_index and in_last_commit:
+        if files_equal(index_path, last_commit_path) and files_equal(wd_path, last_commit_path):
+            return "same as repo"
+        elif files_equal(index_path, wd_path) and not files_equal(index_path, last_commit_path):
+            return "file changed, changes staged for commit"
+        elif not files_equal(index_path, wd_path) and files_equal(index_path, last_commit_path):
+            return "file changed, changes not staged for commit"
+        else:
+            return "file changed, different changes staged for commit"
+    
+    elif in_wd and in_index and not in_last_commit:
+        if files_equal(wd_path, index_path):
+            return "added to index"
+        else:
+            return "added to index, file changed"
+    
+    elif in_wd and not in_index and in_last_commit:
+        if files_equal(wd_path, last_commit_path):
+            return "same as repo"
+        else:
+            return "file changed, changes not staged for commit"
+    
+    elif in_wd and not in_index and not in_last_commit:
+        return "untracked"
+    
+    elif not in_wd and in_index and in_last_commit:
+        if files_equal(index_path, last_commit_path):
+            return "file deleted"
+        else:
+            return "file deleted, changes staged for commit"
+    
+    elif not in_wd and in_index and not in_last_commit:
+        return "added to index, file deleted"
+    
+    elif not in_wd and not in_index and in_last_commit:
+        return "file deleted, deleted from index"
+    
+    return "unknown"
+
+def main():
+    global commit_count
+    if not os.path.isdir(".mygit"):
+        print("mygit-status: error: no .mygit directory found", file=sys.stderr)
+        sys.exit(1)
+    
+    index_dir = ".mygit/index"
+    commits_dir = ".mygit/commits"
+    
+    # Get commit count
+    try:
+        with open(".mygit/commit_count", "r") as f:
+            commit_count = int(f.read().strip())
+    except:
+        commit_count = 0
+    
+    # Collect all relevant files with filtering
+    all_files = set()
+    
+    # Working directory files
+    for filename in glob.glob("*"):
+        if filename != ".mygit" and os.path.isfile(filename):
+            all_files.add(filename)
+    
+    # Index files
+    if os.path.exists(index_dir):
+        for root, _, files in os.walk(index_dir):
+            for file in files:
+                rel_path = os.path.relpath(os.path.join(root, file), index_dir)
+                if os.path.basename(rel_path) != "commit_info":  # Filter out
+                    all_files.add(rel_path)
+    
+    # Last commit files
+    if commit_count > 0:
+        last_commit_dir = os.path.join(commits_dir, str(commit_count - 1))
+        if os.path.exists(last_commit_dir):
+            for root, _, files in os.walk(last_commit_dir):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), last_commit_dir)
+                    if os.path.basename(rel_path) != "commit_info":  # Filter out
+                        all_files.add(rel_path)
+
+    # Determine and print status
+    statuses = {}
+    for file in sorted(all_files):
+        statuses[file] = get_file_state(file)
+    
+    for file, status in statuses.items():
+        print(f"{file} - {status}")
+
+if __name__ == "__main__":
+    main()

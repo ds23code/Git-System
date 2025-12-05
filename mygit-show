@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+# Usage check: exactly one argument <commit>:<filename>
+if len(sys.argv) != 2:
+    print("usage: mygit-show <commit>:<filename>", file=sys.stderr)
+    sys.exit(1)
+
+# Check that .mygit directory exists
+if not os.path.isdir(".mygit"):
+    print("mygit-show: error: no .mygit directory found", file=sys.stderr)
+    sys.exit(1)
+
+arg = sys.argv[1]
+
+# Validate format contains ':'
+if ":" not in arg:
+    print(f"mygit-show: error: invalid object name '{arg}'", file=sys.stderr)
+    sys.exit(1)
+
+commit_part, filename = arg.split(":", 1)
+
+# Determine file path based on commit or index
+if commit_part == "":
+    # Show from index if no commit specified
+    index_dir = os.path.join(".mygit", "index")
+    file_path = os.path.join(index_dir, filename)
+else:
+    # Validate commit number
+    try:
+        commit_num = int(commit_part)
+        if commit_num < 0:
+            raise ValueError()
+    except ValueError:
+        print(f"mygit-show: error: unknown commit '{commit_part}'", file=sys.stderr)
+        sys.exit(1)
+
+    commits_dir = os.path.join(".mygit", "commits")
+    commit_dir = os.path.join(commits_dir, str(commit_num))
+
+    # Check commit directory exists
+    if not os.path.exists(commit_dir):
+        print(f"mygit-show: error: unknown commit '{commit_part}'", file=sys.stderr)
+        sys.exit(1)
+
+    file_path = os.path.join(commit_dir, filename)
+
+# Check file exists in chosen location
+if not os.path.exists(file_path):
+    print(f"mygit-show: error: '{filename}' not found in ", end="", file=sys.stderr)
+    if commit_part == "":
+        print("index", file=sys.stderr)
+    else:
+        print(f"commit {commit_part}", file=sys.stderr)
+    sys.exit(1)
+
+# Read and print file content, handling trailing newline
+try:
+    with open(file_path, "r") as f:
+        content = f.read()
+        if content.endswith("\n"):
+            print(content, end="")
+        else:
+            print(content)
+except IOError:
+    print(f"mygit-show: error: could not read '{filename}'", file=sys.stderr)
+    sys.exit(1)

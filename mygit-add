@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+import os
+import sys
+import shutil
+
+def main():
+    # Check if .mygit repo directory exists
+    if not os.path.isdir(".mygit"):
+        print("mygit-add: error: mygit repository directory .mygit not found", 
+              file=sys.stderr)
+        sys.exit(1)
+    
+    # Require at least one filename argument
+    if len(sys.argv) < 2:
+        print("usage: mygit-add <filenames>", file=sys.stderr)
+        sys.exit(1)
+    
+    index_path = ".mygit/index"
+    
+    # Iterate over each filename argument
+    for working_filename in sys.argv[1:]:
+        # If file exists in working directory
+        if os.path.exists(working_filename):
+            # Must be an ordinary file (not directory etc)
+            if not os.path.isfile(working_filename):
+                print(f"mygit-add: error: can not open '{working_filename}'", 
+                      file=sys.stderr)
+                sys.exit(1)
+            
+            # Prepare destination path in index
+            index_file_path = os.path.join(index_path, working_filename)
+            index_parent_dir = os.path.dirname(index_file_path)
+            # Create parent directories inside index if needed (usually none)
+            if index_parent_dir and index_parent_dir != index_path:
+                os.makedirs(index_parent_dir, exist_ok=True)
+            
+            # Copy file content to index (staging area)
+            shutil.copy2(working_filename, index_file_path)
+        else:
+            # File does not exist in working directory
+            
+            # Try to get commit count from .mygit/commit_count
+            try:
+                with open(".mygit/commit_count", "r") as f:
+                    total_commits = int(f.read().strip())
+            except Exception:
+                total_commits = 0
+            
+            file_previously_tracked = False
+            if total_commits > 0:
+                # Check if file existed in last commit directory
+                last_commit_path = os.path.join(".mygit/commits", 
+                                                str(total_commits - 1))
+                last_commit_file_path = os.path.join(last_commit_path,
+                                                     working_filename)
+                file_previously_tracked = os.path.exists(last_commit_file_path)
+            
+            if file_previously_tracked:
+                # File was tracked in last commit but is now missing, 
+                # so stage removal
+                index_existing_file_path = os.path.join(index_path, 
+                                                        working_filename)
+                if os.path.exists(index_existing_file_path):
+                    os.remove(index_existing_file_path)
+            else:
+                # File never tracked and does not exist in working directory
+                print(f"mygit-add: error: can not open '{working_filename}'", 
+                      file=sys.stderr)
+                sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,122 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import pathlib
+
+# Flags for mode control
+is_delete_mode = False
+branch_to_operate = None
+
+# Parse command-line arguments
+if len(sys.argv) == 1:
+    # No arguments: list all branches
+    is_list_mode = True
+elif len(sys.argv) == 2:
+    # Single argument: branch name to create
+    is_list_mode = False
+    branch_to_operate = sys.argv[1]
+elif len(sys.argv) == 3 and sys.argv[1] == "-d":
+    # Delete branch mode
+    is_list_mode = False
+    is_delete_mode = True
+    branch_to_operate = sys.argv[2]
+else:
+    print(f"usage: {os.path.basename(sys.argv[0])} [-d] [branch-name]")
+    exit(1)
+
+# Path to the .mygit directory
+mygit_directory = ".mygit"
+
+# Ensure .mygit directory exists
+if not os.path.exists(mygit_directory):
+    print(f"{os.path.basename(sys.argv[0])}: error: no .mygit directory found")
+    exit(1)
+
+# Check if any commits have been made (commit_count > 0)
+try:
+    with open(os.path.join(mygit_directory, "commit_count"), "r") as commit_file:
+        total_commits = int(commit_file.read().strip())
+    if total_commits == 0:
+        print(f"{os.path.basename(sys.argv[0])}: error: this command cannot be run until after the first commit")
+        exit(1)
+except (IOError, ValueError):
+    print(f"{os.path.basename(sys.argv[0])}: error: this command cannot be run until after the first commit")
+    exit(1)
+
+# Directories and files for branches
+branches_directory = os.path.join(mygit_directory, "branches")
+current_branch_path = os.path.join(mygit_directory, "current_branch")
+
+if is_list_mode:
+    # LIST MODE: Display all existing branches
+    try:
+        with open(current_branch_path, "r") as current_branch_file:
+            active_branch = current_branch_file.read().strip()
+    except IOError:
+        active_branch = "trunk"  # Default branch if none found
+
+    if os.path.exists(branches_directory):
+        branch_names = os.listdir(branches_directory)
+        for branch_name in sorted(branch_names):
+            print(branch_name)
+
+elif is_delete_mode:
+    # DELETE MODE: Delete the specified branch
+    try:
+        with open(current_branch_path, "r") as current_branch_file:
+            active_branch = current_branch_file.read().strip()
+    except IOError:
+        active_branch = "trunk"
+
+    if branch_to_operate == active_branch:
+        # Cannot delete the current active branch
+        if branch_to_operate == "trunk":
+            print(f"{os.path.basename(sys.argv[0])}: error: cannot delete branch '{branch_to_operate}': default branch")
+        else:
+            print(f"{os.path.basename(sys.argv[0])}: error: cannot delete current branch")
+        exit(1)
+
+    branch_file_path = os.path.join(branches_directory, branch_to_operate)
+    if not os.path.exists(branch_file_path):
+        print(f"{os.path.basename(sys.argv[0])}: error: branch '{branch_to_operate}' doesn't exist")
+        exit(1)
+
+    os.remove(branch_file_path)
+    print(f"Deleted branch '{branch_to_operate}'")
+
+else:
+    # CREATE MODE: Create a new branch with the current commit
+    branch_file_path = os.path.join(branches_directory, branch_to_operate)
+
+    if os.path.exists(branch_file_path):
+        print(f"{os.path.basename(sys.argv[0])}: error: branch '{branch_to_operate}' already exists")
+        exit(1)
+
+    try:
+        with open(current_branch_path, "r") as current_branch_file:
+            active_branch = current_branch_file.read().strip()
+    except IOError:
+        active_branch = "trunk"
+
+    # Determine current commit to assign to new branch
+    active_branch_file_path = os.path.join(branches_directory, active_branch)
+
+    if active_branch == "trunk":
+        # trunk uses commit_count - 1 as the current commit
+        try:
+            with open(os.path.join(mygit_directory, "commit_count"), "r") as commit_file:
+                total_commits = int(commit_file.read().strip())
+            current_commit_hash = str(total_commits - 1) if total_commits > 0 else ""
+        except (IOError, ValueError):
+            current_commit_hash = ""
+    else:
+        try:
+            with open(active_branch_file_path, "r") as active_branch_file:
+                current_commit_hash = active_branch_file.read().strip()
+        except IOError:
+            current_commit_hash = ""
+
+    # Create new branch file with the current commit hash
+    with open(branch_file_path, "w") as new_branch_file:
+        new_branch_file.write(current_commit_hash)
